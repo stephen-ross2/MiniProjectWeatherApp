@@ -28,11 +28,11 @@ class Program
             switch (userSelection)
             {
                 case "1":
-                    await FetchWeatherData("metar");
+                    await FetchWeatherData("metar"); //calls the FetchWeatherData method to fetch the METAR data via the URL below
                     break;
 
                 case "2":
-                    await FetchWeatherData("taf");
+                    await FetchWeatherData("taf"); //calls the FetchWeatherData method to fetch the TAF data via the URL below
                     break;
 
                 case "3": //ends the menu loop and exits the application
@@ -40,7 +40,7 @@ class Program
                     Console.WriteLine("Thank you for using the Aviation Planning App. Have a safe flight!");
                     break;
 
-                default:
+                default: //Error message for invalid input
                     Console.WriteLine("Invalid selection. Please select a valid option from the menu.");
                     break;
             }
@@ -64,19 +64,20 @@ class Program
             return;
         }
 
-        string baseUrl = "https://api.checkwx.com"; //API Origin URL
-        string endpoint = type == "metar" ? "metar" : "taf"; 
+        //The data is gathered by constructing a URL with the base URL and the endpoint for the type of weather data requested (METAR or TAF).
+        string baseUrl = "https://api.checkwx.com"; //API Base URL
+        string endpoint = type == "metar" ? "metar" : "taf"; //determines what type of weather infor the user is looking for and adds it to the URL used to fetch the data
         string url = $"{baseUrl}/{endpoint}/{airportCode}/decoded"; //API URL to fetch the weather data based on the user input. "decoded" makes the data more readable and can be deleted for the raw text
 
         using HttpClient client = new();
-        client.DefaultRequestHeaders.Add("X-API-Key", ApiKey);
+        client.DefaultRequestHeaders.Add("X-API-Key", ApiKey); //Uses the API key to the request header for authentication
 
-        try
+        try //Try-catch block to handle errors/exceptions during the API request
         {
             Console.WriteLine($"\nRequest URL: {url}");
-            HttpResponseMessage response = await client.GetAsync(url);
+            HttpResponseMessage response = await client.GetAsync(url); //Sends a GET request to the API URL and awaits the response
 
-            if (response.IsSuccessStatusCode)
+            if (response.IsSuccessStatusCode) //If the response is successful, the data is read and displayed to the user
             {
                 string responseBody = await response.Content.ReadAsStringAsync();
 
@@ -87,7 +88,7 @@ class Program
                 });
 
                 Console.WriteLine("\n===== Weather Data (Formatted JSON) =====\n");
-                Console.WriteLine(formattedJson);
+                Console.WriteLine(formattedJson); //Displays the formatted JSON data to the user in the console
                 Console.WriteLine("\n========================================\n");
 
                 // Ask the user if they want to export the data to a file for viewing in Notepad++ for printing. 
@@ -103,7 +104,7 @@ class Program
                     Console.WriteLine("Export skipped.");
                 }
             }
-            else
+            else //If the response is not successful, an error message is displayed to the user
             {
                 Console.WriteLine($"Failed to fetch {type.ToUpper()}. Status Code: {response.StatusCode}");
                 string errorContent = await response.Content.ReadAsStringAsync();
