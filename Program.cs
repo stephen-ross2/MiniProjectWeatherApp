@@ -53,58 +53,45 @@ class Program
         }
     }
 
-    static async Task FetchWeatherData(string type) //FetchWeatherData method to pull weather data from the API
+    static async Task FetchWeatherData(string type)
     {
-        Console.WriteLine($"Enter the ICAO code(s) for {type.ToUpper()} (e.g., KJFK, KLAX). Separate multiple codes with a comma:"); 
-        string airportCode = Console.ReadLine(); //Asks the user to input the airport identifier and stores it in the airportCode variable
+        Console.WriteLine($"Enter the ICAO code(s) for {type.ToUpper()} (e.g., KJFK, KLAX). Separate multiple codes with a comma:");
+        string airportCode = Console.ReadLine();
 
-        if (string.IsNullOrWhiteSpace(airportCode)) //Edge case to check if the user input is empty or incorrect. If it is, the code returns an error message and exits the method
+        if (string.IsNullOrWhiteSpace(airportCode))
         {
             Console.WriteLine("Invalid input. Please enter at least one ICAO code.");
             return;
         }
 
-        //The data is gathered by constructing a URL with the base URL and the endpoint for the type of weather data requested (METAR or TAF).
-        string baseUrl = "https://api.checkwx.com"; //API Base URL
-        string endpoint = type == "metar" ? "metar" : "taf"; //determines what type of weather infor the user is looking for and adds it to the URL used to fetch the data
-        string url = $"{baseUrl}/{endpoint}/{airportCode}/decoded"; //API URL to fetch the weather data based on the user input. "decoded" makes the data more readable and can be deleted for the raw text
+        string baseUrl = "https://api.checkwx.com";
+        string endpoint = type == "metar" ? "metar" : "taf";
+        string url = $"{baseUrl}/{endpoint}/{airportCode}/decoded";
 
         using HttpClient client = new();
-        client.DefaultRequestHeaders.Add("X-API-Key", ApiKey); //Uses the API key to the request header for authentication
+        client.DefaultRequestHeaders.Add("X-API-Key", ApiKey);
 
-        try //Try-catch block to handle errors/exceptions during the API request
+        try
         {
             Console.WriteLine($"\nRequest URL: {url}");
-            HttpResponseMessage response = await client.GetAsync(url); //Sends a GET request to the API URL and awaits the response
+            HttpResponseMessage response = await client.GetAsync(url);
 
-            if (response.IsSuccessStatusCode) //If the response is successful, the data is read and displayed to the user
+            if (response.IsSuccessStatusCode)
             {
                 string responseBody = await response.Content.ReadAsStringAsync();
 
-                var jsonDocument = JsonDocument.Parse(responseBody);
-                var formattedJson = JsonSerializer.Serialize(jsonDocument, new JsonSerializerOptions
+                // Process the weather data here
+                try
                 {
-                    WriteIndented = true
-                });
-
-                Console.WriteLine("\n===== Weather Data (Formatted JSON) =====\n");
-                Console.WriteLine(formattedJson); //Displays the formatted JSON data to the user in the console
-                Console.WriteLine("\n========================================\n");
-
-                // Ask the user if they want to export the data to a file for viewing in Notepad++ for printing. 
-                Console.WriteLine("Do you want to export the formatted JSON data to a file for viewing in Notepad++? (yes/no):");
-                string exportChoice = Console.ReadLine()?.ToLower();
-
-                if (exportChoice == "yes")
-                {
-                    await ExportJsonToNotepad(responseBody); // Exports the JSON file. 
+                    var jsonDocument = JsonDocument.Parse(responseBody);
+                    ExtractWeatherDetails(jsonDocument, type); // Pass parsed JSON to decoding method
                 }
-                else
+                catch (Exception ex)
                 {
-                    Console.WriteLine("Export skipped.");
+                    Console.WriteLine($"Error decoding JSON: {ex.Message}");
                 }
             }
-            else //If the response is not successful, an error message is displayed to the user
+            else
             {
                 Console.WriteLine($"Failed to fetch {type.ToUpper()}. Status Code: {response.StatusCode}");
                 string errorContent = await response.Content.ReadAsStringAsync();
@@ -120,6 +107,184 @@ class Program
             Console.WriteLine($"Error fetching {type.ToUpper()}: {ex.Message}");
         }
     }
+
+
+    static void ExtractWeatherDetails(JsonDocument jsonDocument, string type)
+    {
+
+
+        var data = jsonDocument.RootElement.GetProperty("data");
+        foreach (var report in data.EnumerateArray())
+        {
+            string station = report.GetProperty("icao").GetString();
+            string rawText = report.GetProperty("raw_text").GetString();
+            Console.WriteLine($"Station: {station}");
+            Console.WriteLine($"\n===== Raw {type.ToUpper()} =====\n{rawText}");
+            Console.WriteLine($"\n===== Decoded {type.ToUpper()} =====");
+
+            try
+            {
+                if (type == "metar")
+                {
+                    // METAR-specific decoding
+                    DecodeMetarDetails(report);
+                }
+                else if (type == "taf")
+                {
+                    // TAF-specific decoding
+                    DecodeTafDetails(report);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error processing decoded {type.ToUpper()} data: {ex.Message}");
+            }
+                      
+
+            Console.WriteLine("\n========================================\n");
+        }
+    }
+
+    static void DecodeMetarDetails(JsonElement report)
+    {
+        // Temperature and dewpoint
+        if (report.TryGetProperty("temperature", out var temperatureElement))
+        {
+            var tempC = temperatureElement.GetProperty("celsius").GetDouble();
+            Console.WriteLine($"  Temperature: {tempC}°C");
+        }
+
+        if (report.TryGetProperty("dewpoint", out var dewpointElement))
+        {
+            var dewC = dewpointElement.GetProperty("celsius").GetDouble();
+            Console.WriteLine($"  Dewpoint: {dewC}°C");
+        }
+
+        // Wind
+        if (report.TryGetProperty("wind", out var windElement))
+        {
+            var windDir = windElement.GetProperty("degrees").GetInt32();
+            var windSpeedKts = windElement.GetProperty("speed_kts").GetInt32();
+            Console.WriteLine($"  Wind: {windSpeedKts} knots from {windDir}°");
+        }
+
+        // Visibility
+        if (report.TryGetProperty("visibility", out var visibilityElement))
+        {
+            var visibilityMiles = visibilityElement.GetProperty("miles_float").GetDouble();
+            Console.WriteLine($"  Visibility: {visibilityMiles} miles");
+        }
+
+        // Altimeter
+        if (report.TryGetProperty("barometer", out var barometerElement))
+        {
+            var altimeterHg = barometerElement.GetProperty("hg").GetDouble();
+            Console.WriteLine($"  Altimeter: {altimeterHg} inHg");
+        }
+
+        // Cloud Ceilings
+        if (report.TryGetProperty("clouds", out var cloudsElement) && cloudsElement.GetArrayLength() > 0)
+        {
+            Console.WriteLine("  Cloud Ceilings:");
+            foreach (var cloud in cloudsElement.EnumerateArray())
+            {
+                var coverage = cloud.GetProperty("text").GetString();
+                if (cloud.TryGetProperty("base_feet_agl", out var baseFeetElement))
+                {
+                    var baseFeet = baseFeetElement.GetInt32();
+                    Console.WriteLine($"    - {coverage} at {baseFeet} feet AGL");
+                }
+                else
+                {
+                    Console.WriteLine($"    - {coverage} at an unknown height.");
+                }
+            }
+        }
+        else
+        {
+            Console.WriteLine("  Cloud Ceilings: No significant clouds.");
+        }
+    }
+
+    static void DecodeTafDetails(JsonElement report)
+    {
+        Console.WriteLine("\nDecoded TAF Details:");
+
+        if (report.TryGetProperty("forecast", out var forecastElement) && forecastElement.GetArrayLength() > 0)
+        {
+            Console.WriteLine("  Forecast Periods:");
+            foreach (var period in forecastElement.EnumerateArray())
+            {
+                try
+                {
+                    // Extract start and end times from the "timestamp" object
+                    var timestamp = period.GetProperty("timestamp");
+                    string startTime = timestamp.GetProperty("from").GetString();
+                    string endTime = timestamp.GetProperty("to").GetString();
+
+                    Console.WriteLine($"    From {startTime} to {endTime}:");
+
+                    // Weather conditions (optional)
+                    if (period.TryGetProperty("change", out var changeElement))
+                    {
+                        var changeText = changeElement.GetProperty("indicator").GetProperty("text").GetString();
+                        Console.WriteLine($"      Change: {changeText}");
+                    }
+
+                    // Wind
+                    if (period.TryGetProperty("wind", out var windElement))
+                    {
+                        var windDir = windElement.GetProperty("degrees").GetInt32();
+                        var windSpeedKts = windElement.GetProperty("speed_kts").GetInt32();
+                        Console.WriteLine($"      Wind: {windSpeedKts} knots from {windDir}°");
+                    }
+
+                    // Visibility
+                    if (period.TryGetProperty("visibility", out var visibilityElement))
+                    {
+                        var visibilityMiles = visibilityElement.GetProperty("miles").GetString();
+                        Console.WriteLine($"      Visibility: {visibilityMiles}");
+                    }
+
+                    // Clouds
+                    if (period.TryGetProperty("clouds", out var cloudsElement) && cloudsElement.GetArrayLength() > 0)
+                    {
+                        Console.WriteLine("      Clouds:");
+                        foreach (var cloud in cloudsElement.EnumerateArray())
+                        {
+                            var coverage = cloud.GetProperty("text").GetString();
+                            if (cloud.TryGetProperty("base_feet_agl", out var baseFeetElement))
+                            {
+                                var baseFeet = baseFeetElement.GetInt32();
+                                Console.WriteLine($"        - {coverage} at {baseFeet} feet AGL");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"        - {coverage}");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("      Clouds: None reported.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"      Error processing period data: {ex.Message}");
+                }
+            }
+        }
+        else
+        {
+            Console.WriteLine("  No forecast data available.");
+        }
+    }
+
+
+
+
+
 
     static async Task ExportJsonToNotepad(string json) //This method exports the JSON data to a file and opens it in Notepad++ for viewing and printing if needed. 
     {
