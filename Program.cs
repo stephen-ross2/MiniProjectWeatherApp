@@ -16,10 +16,11 @@ class Program
         {
             Console.Clear();
             Console.ForegroundColor = ConsoleColor.Magenta;
-            Console.WriteLine("======= AVIATION WEATHER PLANNING APP =======");
+            Console.WriteLine("======= FLIGHT FORECASTS =======");
             Console.ResetColor(); // Reset the color to default after the title
+            Console.WriteLine("\nPlease select an option below by typing the number and pressing ENTER:");
             Console.WriteLine();
-            Console.WriteLine("1. Check METARs and TAFs for an airport");
+            Console.WriteLine("1. Check current and forecasted weather conditions at an airport (METARs / TAFs)");
             Console.WriteLine("2. Exit");
             Console.WriteLine();
 
@@ -62,10 +63,11 @@ class Program
     static async Task FetchAndDisplayWeatherData(string airportCodes)
     {
         string baseUrl = "https://api.checkwx.com";
+        string dataToSave = ""; // This will accumulate the data that we'll potentially save to file
 
+        // Split the input for multiple codes
         foreach (string code in airportCodes.Split(','))
         {
-            // Loop through METAR and TAF separately
             foreach (string type in new[] { "metar", "taf" })
             {
                 string endpoint = $"{baseUrl}/{type}/{code}/decoded";
@@ -84,30 +86,29 @@ class Program
                         try
                         {
                             var jsonDocument = JsonDocument.Parse(responseBody);
-
-                            // Extract the airport name and location
                             var airportData = jsonDocument.RootElement.GetProperty("data")[0];
                             var station = airportData.GetProperty("station");
                             var airportName = station.GetProperty("name").GetString();
                             var location = station.GetProperty("location").GetString();
 
-                            // Set font color to Cyan for airport and location
-                            Console.ForegroundColor = ConsoleColor.Cyan;
-                            if (type == "metar")
+                            // Display the airport details once, before showing METAR/TAF data
+                            if (dataToSave == "")  // Only show once for the first report
                             {
-                                Console.WriteLine($"\n\n\nAirport: {airportName} - Location: {location}");
-                                Console.WriteLine();
+                                Console.ForegroundColor = ConsoleColor.Cyan;
+                                Console.WriteLine($"\n\nAirport: {airportName} - Location: {location}");
+                                Console.ResetColor();
+                                dataToSave += $"\nAirport: {airportName} - Location: {location}\n\n"; // Save airport info
                             }
-                            // Reset the color back to default
-                            Console.ResetColor();
 
-                            // Fetch and decode METAR/TAF details based on the type
-                            ExtractWeatherDetails(jsonDocument, type);
+                            // Display and accumulate METAR/TAF details
+                            string weatherDetails = ExtractWeatherDetails(jsonDocument, type);
+                            Console.WriteLine(weatherDetails);
+                            dataToSave += weatherDetails; // Accumulate to be saved to file
 
-                            // Add separator after TAF section
                             if (type == "taf")
                             {
                                 Console.WriteLine("___________________________________________________________________________________________________________________________________________________________________________");
+                                dataToSave += "\n___________________________________________________________________________________________________________________________________________________________________________\n";
                             }
                         }
                         catch (Exception ex)
@@ -130,94 +131,104 @@ class Program
                 }
             }
         }
-    }
 
+        // Prompt for saving the data
+        Console.WriteLine("\nWould you like to save this weather data to a file? (y/n)");
+        string saveResponse = Console.ReadLine()?.ToLower();
 
-    static void ExtractWeatherDetails(JsonDocument jsonDocument, string type)
-    {
-
-
-        var data = jsonDocument.RootElement.GetProperty("data");
-        foreach (var report in data.EnumerateArray())
+        if (saveResponse == "y")
         {
-            Console.WriteLine($"\n\n========= {type.ToUpper()} =========");
-            Console.WriteLine($"\n\nRaw: {report.GetProperty("raw_text").GetString()}");
+            Console.WriteLine("\nEnter the filename (without extension): ");
+            string fileName = Console.ReadLine()?.Trim();
 
-            if (type == "metar")
+            if (string.IsNullOrEmpty(fileName))
             {
-                DecodeMetarDetails(report);
-            }
-            else if (type == "taf")
-            {
-                DecodeTafDetails(report);
+                Console.WriteLine("Invalid filename. Using default name 'WeatherData'.");
+                fileName = "WeatherData";  // Set a default filename if the input is invalid.
             }
 
+            // Call SaveDataToFile with the user-provided filename
+            await SaveDataToFile(fileName, dataToSave);
+            Console.WriteLine("Data has been saved to your desktop.");
         }
     }
 
-    static void DecodeMetarDetails(JsonElement report)
-    {
-        Console.WriteLine("\nDecoded METAR Details:");
 
-        // Observation time
+    static string ExtractWeatherDetails(JsonDocument jsonDocument, string type)
+    {
+        var data = jsonDocument.RootElement.GetProperty("data");
+        string details = ""; // Store the raw and decoded data
+
+        foreach (var report in data.EnumerateArray())
+        {
+            details += $"\n\n========= {type.ToUpper()} =========";
+            details += $"\nRaw: {report.GetProperty("raw_text").GetString()}";
+
+            if (type == "metar")
+            {
+                details += DecodeMetarDetailsToString(report);
+            }
+            else if (type == "taf")
+            {
+                details += DecodeTafDetailsToString(report);
+            }
+        }
+
+        return details;
+    }
+
+    static string DecodeMetarDetailsToString(JsonElement report)
+    {
+        string details = "\n\nDecoded METAR Details:";
+
         if (report.TryGetProperty("observed", out var observedTime))
         {
             DateTime observationDateTime = DateTime.Parse(observedTime.GetString());
             string formattedDate = observationDateTime.ToString("MMM dd yyyy HH:mm 'UTC'");
-            Console.WriteLine($"  Observation Time: {formattedDate}");
-        }
-        else
-        {
-            Console.WriteLine("  Observation Time: Not available.");
+            details += $"\n\n  Observation Time: {formattedDate}";
         }
 
-        // Temperature
         if (report.TryGetProperty("temperature", out var temp))
         {
             double tempCelsius = temp.GetProperty("celsius").GetDouble();
             double tempFahrenheit = tempCelsius * 9 / 5 + 32;
-            Console.WriteLine($"  Temperature: {tempCelsius}°C ({tempFahrenheit:F1}°F)");
+            details += $"\n  Temperature: {tempCelsius}°C ({tempFahrenheit:F1}°F)";
         }
 
-        // Dewpoint
         if (report.TryGetProperty("dewpoint", out var dewpoint))
         {
             double dewCelsius = dewpoint.GetProperty("celsius").GetDouble();
             double dewFahrenheit = dewCelsius * 9 / 5 + 32;
-            Console.WriteLine($"  Dewpoint: {dewCelsius}°C ({dewFahrenheit:F1}°F)");
+            details += $"\n  Dewpoint: {dewCelsius}°C ({dewFahrenheit:F1}°F)";
         }
 
-        // Wind
         if (report.TryGetProperty("wind", out var wind))
         {
-            Console.WriteLine($"  Wind: {wind.GetProperty("degrees").GetInt32():D3}° @ {wind.GetProperty("speed_kts").GetInt32()} knots");
+            details += $"\n  Wind: {wind.GetProperty("degrees").GetInt32():D3}° @ {wind.GetProperty("speed_kts").GetInt32()} knots";
         }
 
-        // Visibility
         if (report.TryGetProperty("visibility", out var visibility))
         {
-            Console.WriteLine($"  Visibility: {visibility.GetProperty("miles_float").GetDouble()} miles");
+            details += $"\n  Visibility: {visibility.GetProperty("miles_float").GetDouble()} miles";
         }
 
-        // Barometer (Altimeter)
         if (report.TryGetProperty("barometer", out var barometer) && barometer.ValueKind == JsonValueKind.Object)
         {
             if (barometer.TryGetProperty("hg", out var barometerHg))
             {
                 double barometerInHg = barometerHg.GetDouble();
-                Console.WriteLine($"  Altimeter: {barometerInHg:F2} inHg");
+                details += $"\n  Altimeter: {barometerInHg:F2} inHg";
             }
             else
             {
-                Console.WriteLine("  Altimeter: 'hg' property not found.");
+                details += "\n  Altimeter: 'hg' property not found.";
             }
         }
         else
         {
-            Console.WriteLine("  Altimeter: Data not available.");
+            details += "\n  Altimeter: Data not available.";
         }
 
-        // Ceiling
         if (report.TryGetProperty("clouds", out var clouds) && clouds.GetArrayLength() > 0)
         {
             foreach (var cloud in clouds.EnumerateArray())
@@ -225,60 +236,52 @@ class Program
                 var coverage = cloud.GetProperty("text").GetString();
                 if (cloud.TryGetProperty("base_feet_agl", out var baseFeet))
                 {
-                    Console.WriteLine($"  Ceiling: {coverage} at {baseFeet.GetInt32()}ft AGL");
+                    details += $"\n  Ceiling: {coverage} at {baseFeet.GetInt32()}ft AGL";
                 }
                 else
                 {
-                    Console.WriteLine($"  Ceiling: {coverage} at cloud base height not available.");
+                    details += $"\n  Ceiling: {coverage} at cloud base height not available.";
                 }
             }
         }
         else
         {
-            Console.WriteLine("  Ceiling: No data available.");
+            details += "\n  Ceiling: No data available.";
         }
+
+        return details;
     }
 
-    static void DecodeTafDetails(JsonElement report)
+    static string DecodeTafDetailsToString(JsonElement report)
     {
-        Console.WriteLine("\nDecoded TAF Details:");
+        string details = "\n\nDecoded TAF Details:";
 
         if (report.TryGetProperty("forecast", out var forecasts))
         {
             foreach (var forecast in forecasts.EnumerateArray())
             {
-                // Timestamp
                 if (forecast.TryGetProperty("timestamp", out var timestamp))
                 {
                     string fromTime = timestamp.GetProperty("from").GetString();
                     string toTime = timestamp.GetProperty("to").GetString();
                     DateTime fromDateTime = DateTime.Parse(fromTime);
                     DateTime toDateTime = DateTime.Parse(toTime);
-                    string formattedFromTime = fromDateTime.ToString("MMM dd yyyy HH:mm 'UTC'");
-                    string formattedToTime = toDateTime.ToString("MMM dd yyyy HH:mm 'UTC'");
-
-                    // Set the forecast period to yellow color
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.WriteLine($"  \nForecast: From {formattedFromTime} to {formattedToTime}");
-                    Console.ResetColor(); // Reset to default color for subsequent text
+                    details += $"\n\n  Forecast: From {fromDateTime:MMM dd yyyy HH:mm 'UTC'} to {toDateTime:MMM dd yyyy HH:mm 'UTC'}";
                 }
 
-                // Wind
                 if (forecast.TryGetProperty("wind", out var wind))
                 {
                     int windDirection = wind.GetProperty("degrees").GetInt32();
                     int windSpeed = wind.GetProperty("speed_kts").GetInt32();
                     string formattedWindDirection = windDirection.ToString("D3");
-                    Console.WriteLine($"\n    Wind: {formattedWindDirection} @ {windSpeed} knots");
+                    details += $"\n\n    Wind: {formattedWindDirection} @ {windSpeed} knots";
                 }
 
-                // Visibility
                 if (forecast.TryGetProperty("visibility", out var visibility))
                 {
-                    Console.WriteLine($"    Visibility: {visibility.GetProperty("miles").GetString()} miles");
+                    details += $"\n    Visibility: {visibility.GetProperty("miles").GetString()} miles";
                 }
 
-                // Ceiling
                 if (forecast.TryGetProperty("clouds", out var clouds) && clouds.GetArrayLength() > 0)
                 {
                     foreach (var cloud in clouds.EnumerateArray())
@@ -286,22 +289,42 @@ class Program
                         var coverage = cloud.GetProperty("text").GetString();
                         if (cloud.TryGetProperty("base_feet_agl", out var baseFeet))
                         {
-                            Console.WriteLine($"    Ceiling: {coverage} at {baseFeet.GetInt32()}ft AGL");
+                            details += $"\n    Ceiling: {coverage} at {baseFeet.GetInt32()}ft AGL";
                         }
                         else
                         {
-                            Console.WriteLine($"    Ceiling: {coverage} at cloud base height not available.");
+                            details += $"\n    Ceiling: {coverage} at cloud base height not available.";
                         }
                     }
                 }
                 else
                 {
-                    Console.WriteLine("    Ceiling: No data available.");
+                    details += "\n    Ceiling: No data available.";
                 }
             }
         }
+
+        return details;
+    }
+
+    static async Task SaveDataToFile(string fileName, string data)
+    {
+        // Ensure the filename doesn't contain any invalid characters
+        foreach (char c in Path.GetInvalidFileNameChars())
+        {
+            fileName = fileName.Replace(c, '_'); // Replace invalid characters with an underscore
+        }
+
+        string filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), fileName + ".txt");
+
+        using (StreamWriter writer = new StreamWriter(filePath, false))
+        {
+            await writer.WriteAsync(data);
+        }
     }
 }
+
+
 
 
 
